@@ -1,4 +1,13 @@
 export default function handler(req, res) {
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   return res.status(200).json({
     ok: true,
