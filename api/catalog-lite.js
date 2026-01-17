@@ -1,36 +1,65 @@
 export default async function handler(req, res) {
   try {
+    // Número máximo de productos que regresamos a Flowise
     const limit = Number(req.query.limit || 20);
 
-    const r = await fetch("https://bloomwell.mx/products.json?limit=250", {
-      headers: { Accept: "application/json" }
-    });
+    // --- Protección contra timeouts ---
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
-    if (!r.ok) return res.status(r.status).json({ error: "upstream_error", status: r.status });
+    // --- Llamada a Shopify (payload reducido para evitar cortes) ---
+    const response = await fetch(
+      "https://bloomwell.mx/products.json?limit=50",
+      {
+        headers: { Accept: "application/json" },
+        signal: controller.signal
+      }
+    );
 
-    const data = await r.json();
+    clearTimeout(timeout);
 
+    if (!response.ok) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.status(response.status).json({
+        error: "upstream_error",
+        status: response.status
+      });
+    }
+
+    const data = await response.json();
+
+    // --- Normalización del catálogo ---
     const items = (data.products || [])
-      .map(p => {
-        const v = (p.variants || []).find(x => x.available) || (p.variants || [])[0] || {};
-        const available = (p.variants || []).some(x => x.available);
+      .map(product => {
+        const variants = product.variants || [];
+        const availableVariant =
+          variants.find(v => v.available) || variants[0] || {};
+
+        const available = variants.some(v => v.available);
 
         return {
-          title: p.title,
-          handle: p.handle,
-          url: `https://bloomwell.mx/products/${p.handle}`,
+          title: product.title,
+          handle: product.handle,
+          url: `https://bloomwell.mx/products/${product.handle}`,
           available,
-          price: v.price ?? null,
-          compare_at_price: v.compare_at_price ?? null,
-          tags: p.tags || []
+          price: availableVariant.price ?? null,
+          compare_at_price: availableVariant.compare_at_price ?? null,
+          tags: product.tags || []
         };
       })
-      .filter(x => x.available)
+      .filter(item => item.available)
       .slice(0, limit);
 
+    // --- Headers claros para Flowise ---
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
+
     return res.status(200).json({ items });
-  } catch (e) {
-    return res.status(500).json({ error: "proxy_failed", message: String(e?.message || e) });
+  } catch (error) {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    return res.status(500).json({
+      error: "proxy_failed",
+      message: String(error?.message || error)
+    });
   }
 }
